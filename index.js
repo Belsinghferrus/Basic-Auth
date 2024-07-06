@@ -2,16 +2,19 @@ import express from "express";
 import bodyParser from "body-parser";
 import pg from 'pg';
 import env from "dotenv"
+import bcrypt from "bcrypt"
 
-env.config()
+
+env.config();
 
 const app = express();
 const port = 3000;
+const saltRounds = 10;
 const db = new pg.Client({
-  user : process.env.PG_USER,
+  user: process.env.PG_USER,
   host: process.env.PG_HOST,
-  password: process.env.PG_PASSWORD,
   database: process.env.PG_DATABASE,
+  password: process.env.PG_PASSWORD,
   port: process.env.PG_PORT
 });
 
@@ -37,15 +40,23 @@ app.post("/register", async (req, res) => {
   const email = req.body.username;
   const password = req.body.password;
   try{
+    //check existing email
       const checkResult = await db.query("SELECT * FROM users WHERE email = $1", [email]);
   if (checkResult.rows.length >0){
     res.send("Email already exist")
   } else {
-    const result = await db.query( "INSERT INTO users (email, password) VALUES ($1, $2)  ",
-    [email, password]);
-    if (result.rowCount==1){
+    //password hashing
+    bcrypt.hash(password, saltRounds, async (err, hash) => {
+      if (err){
+        console.log("error hashing password:", err);
+      } else{
+          const result = await db.query( "INSERT INTO users (email, password) VALUES ($1, $2)  ",
+        [email, hash]);
+      if (result.rowCount==1){
       res.render("secrets.ejs")
     }}
+    })
+  }
   } catch(error){
     console.log(error);
   }
@@ -53,17 +64,21 @@ app.post("/register", async (req, res) => {
 
 app.post("/login", async (req, res) => {
   const email = req.body.username;
-  const password = req.body.password;
+  const loginPassword = req.body.password;
   try{
      const result = await db.query("SELECT * FROM users WHERE email = $1", [email])
   if (result.rows.length > 0){
     const user = result.rows[0]
     const storedPassword = user.password;
-    if (password == storedPassword){
-       res.render("secrets.ejs")
-    } else{
-      res.send("Incorrect password")
-    }
+    //compare password in hashing
+    bcrypt.compare(loginPassword, storedPassword, (err, result) => {
+      if(err){
+        console.log("Error in compare:", err);
+      } if (result){
+          res.render("secrets.ejs")
+        }else{
+          res.send("Incorrect password")
+        }})
   } else {
     res.send("User does not exist")
   }
